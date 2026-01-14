@@ -8,14 +8,51 @@ import { User, StudyFile, CalendarEvent, ViewState } from './types';
 import { INITIAL_USERS, INITIAL_FILES, INITIAL_EVENTS } from './services/mockData';
 
 function App() {
-  // --- STATE ---
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [currentView, setCurrentView] = useState<ViewState>('login');
+  // --- STATE WITH PERSISTENCE ---
   
-  // Simulated Database
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
-  const [files, setFiles] = useState<StudyFile[]>(INITIAL_FILES);
-  const [events, setEvents] = useState<CalendarEvent[]>(INITIAL_EVENTS);
+  // Helper to load from localStorage with fallback
+  const loadState = <T,>(key: string, fallback: T): T => {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : fallback;
+    } catch (e) {
+      console.error('Failed to load state', e);
+      return fallback;
+    }
+  };
+
+  const [users, setUsers] = useState<User[]>(() => loadState('sh_users', INITIAL_USERS));
+  const [files, setFiles] = useState<StudyFile[]>(() => loadState('sh_files', INITIAL_FILES));
+  const [events, setEvents] = useState<CalendarEvent[]>(() => {
+    // Dates need to be revived from strings
+    const saved = loadState('sh_events', INITIAL_EVENTS);
+    return saved.map((e: any) => ({
+      ...e,
+      date: new Date(e.date)
+    }));
+  });
+
+  // Persist State Changes
+  useEffect(() => { localStorage.setItem('sh_users', JSON.stringify(users)); }, [users]);
+  useEffect(() => { localStorage.setItem('sh_files', JSON.stringify(files)); }, [files]);
+  useEffect(() => { localStorage.setItem('sh_events', JSON.stringify(events)); }, [events]);
+
+  // Session State
+  const [currentUser, setCurrentUser] = useState<User | null>(() => loadState('sh_session_user', null));
+  const [currentView, setCurrentView] = useState<ViewState>(() => loadState('sh_view', 'login'));
+
+  // Persist Session
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('sh_session_user', JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem('sh_session_user');
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    localStorage.setItem('sh_view', currentView);
+  }, [currentView]);
 
   // --- HANDLERS ---
 
@@ -40,23 +77,20 @@ function App() {
 
   // Files
   const handleUpload = (file: File) => {
-    // In a browser-only environment, we create a blob URL to simulate "hosting"
     const newFile: StudyFile = {
       id: Date.now().toString(),
       name: file.name,
-      category: 'Assignment', // Default, usually user would select this
+      category: 'Assignment', 
       uploadDate: new Date().toISOString(),
       size: `${(file.size / 1024).toFixed(1)} KB`,
-      url: URL.createObjectURL(file),
+      url: URL.createObjectURL(file), // Note: Blob URLs do not persist across reloads well in a real app without backend, but local state simulates it.
       type: file.type
     };
     setFiles(prev => [newFile, ...prev]);
   };
 
   const handleDeleteFile = (id: string) => {
-    if (confirm('Are you sure you want to delete this file?')) {
-      setFiles(prev => prev.filter(f => f.id !== id));
-    }
+    setFiles(prev => prev.filter(f => f.id !== id));
   };
 
   // Events
@@ -88,12 +122,16 @@ function App() {
   };
 
   const handleDeleteUser = (id: string) => {
-    if (confirm('Delete this user account?')) {
-      setUsers(prev => prev.filter(u => u.id !== id));
-    }
+    // Removed window.confirm to ensure the action works reliably in all environments
+    setUsers(prev => prev.filter(u => u.id !== id));
   };
 
   // --- RENDER ---
+
+  if (!currentUser && currentView !== 'login') {
+    // Redirect to login if session is invalid
+    return <Login onLogin={handleLogin} />;
+  }
 
   if (currentView === 'login') {
     return <Login onLogin={handleLogin} />;
